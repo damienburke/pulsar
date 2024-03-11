@@ -25,6 +25,9 @@ import javax.naming.AuthenticationException;
 import org.apache.pulsar.broker.ServiceConfiguration;
 import org.apache.pulsar.broker.authentication.metrics.AuthenticationMetrics;
 
+/**
+ * Authentication Provider for TLS.
+ */
 public class AuthenticationProviderTls implements AuthenticationProvider {
 
     private enum ErrorCode {
