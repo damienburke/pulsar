@@ -29,19 +29,16 @@ import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
 import javax.naming.AuthenticationException;
 import javax.net.ssl.SSLSession;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.broker.ServiceConfiguration;
 import org.apache.pulsar.broker.authentication.metrics.AuthenticationMetrics;
 import org.apache.pulsar.common.api.AuthData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Authentication Provider for TLS.
  */
 public class AuthenticationProviderTls implements AuthenticationProvider {
-
-    public static String TLS_AUTH_NAME = "tls";
-
+    public static final String TLS_AUTH_NAME = "tls";
     public enum ErrorCode {
         UNKNOWN,
         INVALID_CERTS,
@@ -56,7 +53,7 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
     }
 
     @Override
-    public void initialize(ServiceConfiguration config) throws IOException {
+    public void initialize(final ServiceConfiguration config) throws IOException {
         // noop
     }
 
@@ -66,13 +63,13 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
     }
 
     @Override
-    public AuthenticationState newAuthState(AuthData authData, SocketAddress remoteAddress, SSLSession sslSession)
+    public AuthenticationState newAuthState(final AuthData authData, final SocketAddress remoteAddress, final SSLSession sslSession)
             throws AuthenticationException {
         return new TlsAuthenticationState(this, authData, remoteAddress, sslSession);
     }
 
     @Override
-    public String authenticate(AuthenticationDataSource authData) throws AuthenticationException {
+    public String authenticate(final AuthenticationDataSource authData) throws AuthenticationException {
         String commonName = null;
         ErrorCode errorCode = ErrorCode.UNKNOWN;
         try {
@@ -139,9 +136,8 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
  * <a href="https://github.com/apache/pulsar/wiki/PIP-55%3A-Refresh-Authentication-Credentials">
  * PIP-55: Refresh-Authentication-Credentials</a>.
  */
+@Slf4j
 final class TlsAuthenticationState implements AuthenticationState {
-
-    private static final Logger log = LoggerFactory.getLogger(TlsAuthenticationState.class.getName());
     private final AuthenticationProviderTls provider;
     private AuthenticationDataSource authenticationDataSource;
     private X509Certificate clientCertificate;
@@ -202,14 +198,12 @@ final class TlsAuthenticationState implements AuthenticationState {
             throw new AuthenticationException("Unexpected client certificate error: " + e.getMessage());
         }
 
-
         if (this.clientCertificate.getNotAfter() != null) {
             this.expiration = this.clientCertificate.getNotAfter().getTime();
         } else {
             // Disable expiration
             this.expiration = Long.MAX_VALUE;
         }
-
         return null;
     }
 
@@ -231,7 +225,7 @@ final class TlsAuthenticationState implements AuthenticationState {
         return new String(authData.getBytes(), StandardCharsets.UTF_8);
     }
 
-    private void incrementFailureMetric(Enum<?> errorCode) {
+    private void incrementFailureMetric(final Enum<?> errorCode) {
         AuthenticationMetrics.authenticateFailure(getClass().getSimpleName(), TLS_AUTH_NAME, errorCode);
     }
 }
