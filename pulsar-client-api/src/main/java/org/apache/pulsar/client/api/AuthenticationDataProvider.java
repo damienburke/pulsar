@@ -52,7 +52,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return a client certificate chain, or null if the data are not available
      */
     default Certificate[] getTlsCertificates() {
@@ -67,7 +66,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return a private key for the client certificate, or null if the data are not available
      */
     default PrivateKey getTlsPrivateKey() {
@@ -75,7 +73,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return a private key file path
      */
     default String getTlsPrivateKeyFilePath() {
@@ -83,9 +80,8 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return an input-stream of the trust store, or null if the trust-store provided at
-     *         {@link ClientConfigurationData#getTlsTrustStorePath()}
+     * {@link ClientConfigurationData#getTlsTrustStorePath()}
      */
     default InputStream getTlsTrustStoreStream() {
         return null;
@@ -114,7 +110,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return a authentication scheme, or {@code null} if the request will not be authenticated.
      */
     default String getHttpAuthType() {
@@ -122,7 +117,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return an enumeration of all the header names
      */
     default Set<Map.Entry<String, String>> getHttpHeaders() throws Exception {
@@ -143,7 +137,6 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     *
      * @return authentication data which will be stored in a command
      */
     default String getCommandData() {
@@ -151,11 +144,15 @@ public interface AuthenticationDataProvider extends Serializable {
     }
 
     /**
-     * For mutual authentication, This method use passed in `data` to evaluate and challenge,
+     * This method supports two use cases:
+     *
+     * 1. Mutual authentication (e.g. sasl)
+     * This method uses passed in `data` to evaluate and challenge,
      * then returns null if authentication has completed;
      * returns authenticated data back to server side, if authentication has not completed.
      *
-     * <p>Mainly used for mutual authentication like sasl.
+     * 2. Refreshing authentication credentials
+     * For auth providers that support refreshing, this method should return the refreshed credential.
      */
     default AuthData authenticate(AuthData data) throws AuthenticationException {
         byte[] bytes = (hasDataFromCommand() ? this.getCommandData() : "").getBytes(UTF_8);

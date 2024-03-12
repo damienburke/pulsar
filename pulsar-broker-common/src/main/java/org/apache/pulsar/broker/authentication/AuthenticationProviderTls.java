@@ -18,21 +18,34 @@
  */
 package org.apache.pulsar.broker.authentication;
 
+import static org.apache.pulsar.broker.authentication.AuthenticationProviderTls.TLS_AUTH_NAME;
+import static org.apache.pulsar.broker.authentication.utils.CertificateUtils.stringToCertificate;
 import java.io.IOException;
+import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateExpiredException;
+import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
 import javax.naming.AuthenticationException;
+import javax.net.ssl.SSLSession;
 import org.apache.pulsar.broker.ServiceConfiguration;
 import org.apache.pulsar.broker.authentication.metrics.AuthenticationMetrics;
+import org.apache.pulsar.common.api.AuthData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Authentication Provider for TLS.
  */
 public class AuthenticationProviderTls implements AuthenticationProvider {
 
-    private enum ErrorCode {
+    public static String TLS_AUTH_NAME = "tls";
+
+    public enum ErrorCode {
         UNKNOWN,
         INVALID_CERTS,
+        EXPIRED_CERTS,
         INVALID_CN, // invalid common name
     }
 
@@ -48,7 +61,13 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
 
     @Override
     public String getAuthMethodName() {
-        return "tls";
+        return TLS_AUTH_NAME;
+    }
+
+    @Override
+    public AuthenticationState newAuthState(AuthData authData, SocketAddress remoteAddress, SSLSession sslSession)
+            throws AuthenticationException {
+        return new TlsAuthenticationState(this, authData, remoteAddress, sslSession);
     }
 
     @Override
@@ -107,4 +126,115 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
         return commonName;
     }
 
+}
+
+/**
+ * Class representing the mTLS authentication state of a single connection.
+ * <p>
+ * The authentication of certificates is always done in one single stage - but as we want to support challenging the
+ * client to refresh expired credentials (in this case - client certificates) - we provide and configure this
+ * <code>AuthenticationState</code> implementation. For more details, see
+ * the PIP-55 documentation on refreshing authentication credentials:
+ * <a href="https://github.com/apache/pulsar/wiki/PIP-55%3A-Refresh-Authentication-Credentials">
+ * PIP-55: Refresh-Authentication-Credentials</a>.
+ */
+final class TlsAuthenticationState implements AuthenticationState {
+
+    private static final Logger log = LoggerFactory.getLogger(TlsAuthenticationState.class.getName());
+    private final AuthenticationProviderTls provider;
+    private AuthenticationDataSource authenticationDataSource;
+    private X509Certificate clientCertificate;
+    private final SocketAddress remoteAddress;
+    private final SSLSession sslSession;
+    private long expiration;
+    private String role;
+
+    public TlsAuthenticationState(final AuthenticationProviderTls provider, final AuthData authData,
+                                  final SocketAddress remoteAddress, final SSLSession sslSession)
+            throws AuthenticationException {
+        this.provider = provider;
+        this.remoteAddress = remoteAddress;
+        this.sslSession = sslSession;
+        this.authenticate(authData);
+    }
+
+    @Override
+    public String getAuthRole() {
+        return this.role;
+    }
+
+    /**
+     * Perform the authentication. Also sets the {@link #role}, which is used by upstream pulsar authorization checks.
+     *
+     * @param authData contains the bytes of the credential being used for authentication - which in this case is a
+     *                 client
+     *                 certificate.
+     * @return <code>null</code> (only authentication that is mutual would require a non-null value). For more details,
+     * see
+     * the PIP-30 documentation on mutual authentication changes:
+     * <a
+     * href="https://github.com/apache/pulsar/wiki/PIP-30%3A-change-authentication-provider-API-to-support-mutual
+     * -authentication">
+     * PIP-30: Change Authentication Provider API to Support Mutual Authentication</a>.
+     * @throws AuthenticationException if cert is not valid. If cert is just expired, no exception is thrown, and
+     *                                 {@link #expiration} is just set.
+     */
+    public AuthData authenticate(final AuthData authData) throws AuthenticationException {
+
+        final String cert = certificateFromAuthData(authData);
+        this.authenticationDataSource = new AuthenticationDataCommand(cert, this.remoteAddress, this.sslSession);
+
+        this.role = this.provider.authenticate(this.authenticationDataSource);
+
+        this.clientCertificate = stringToCertificate(cert);
+
+        try {
+            // initial connection validated by sun.security.ssl types
+            this.clientCertificate.checkValidity();
+        } catch (CertificateExpiredException e) {
+            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.EXPIRED_CERTS);
+            log.info("expired cert", e);
+            throw new AuthenticationException("expired cert: " + e.getMessage());
+        } catch (CertificateNotYetValidException e) {
+            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.INVALID_CERTS);
+            log.warn("invalid cert", e);
+            throw new AuthenticationException("invalid cert: " + e.getMessage());
+        } catch (Exception e) {
+            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.UNKNOWN);
+            log.warn("unexpected error parsing the cert", e);
+            throw new AuthenticationException("unexpected cert error: " + e.getMessage());
+        }
+
+
+        if (this.clientCertificate.getNotAfter() != null) {
+            this.expiration = this.clientCertificate.getNotAfter().getTime();
+        } else {
+            // Disable expiration
+            this.expiration = Long.MAX_VALUE;
+        }
+
+        return null;
+    }
+
+    public AuthenticationDataSource getAuthDataSource() {
+        return this.authenticationDataSource;
+    }
+
+    public boolean isComplete() {
+        // The authentication of certificates is always done in one single stage, so once certificate is set, it is
+      // "complete"
+        return clientCertificate != null;
+    }
+
+    public boolean isExpired() {
+        return this.expiration < System.currentTimeMillis();
+    }
+
+    private static String certificateFromAuthData(final AuthData authData) {
+        return new String(authData.getBytes(), StandardCharsets.UTF_8);
+    }
+
+    private void incrementFailureMetric(Enum<?> errorCode) {
+        AuthenticationMetrics.authenticateFailure(getClass().getSimpleName(), TLS_AUTH_NAME, errorCode);
+    }
 }

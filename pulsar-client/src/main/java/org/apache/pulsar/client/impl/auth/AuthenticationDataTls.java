@@ -25,6 +25,7 @@ import java.security.KeyManagementException;
 import java.security.PrivateKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -62,12 +63,13 @@ public class AuthenticationDataTls implements AuthenticationDataProvider {
     }
 
     public AuthenticationDataTls(Supplier<ByteArrayInputStream> certStreamProvider,
-            Supplier<ByteArrayInputStream> keyStreamProvider) throws KeyManagementException {
+                                 Supplier<ByteArrayInputStream> keyStreamProvider) throws KeyManagementException {
         this(certStreamProvider, keyStreamProvider, null);
     }
 
     public AuthenticationDataTls(Supplier<ByteArrayInputStream> certStreamProvider,
-            Supplier<ByteArrayInputStream> keyStreamProvider, Supplier<ByteArrayInputStream> trustStoreStreamProvider)
+                                 Supplier<ByteArrayInputStream> keyStreamProvider,
+                                 Supplier<ByteArrayInputStream> trustStoreStreamProvider)
             throws KeyManagementException {
         if (certStreamProvider == null || certStreamProvider.get() == null) {
             throw new IllegalArgumentException("certStream provider or stream must not be null");
@@ -83,9 +85,6 @@ public class AuthenticationDataTls implements AuthenticationDataProvider {
         this.tlsCertificates = SecurityUtility.loadCertificatesFromPemStream(certStream);
         this.tlsPrivateKey = SecurityUtility.loadPrivateKeyFromPemStream(keyStream);
     }
-    /*
-     * TLS
-     */
 
     @Override
     public boolean hasDataForTls() {
@@ -150,6 +149,34 @@ public class AuthenticationDataTls implements AuthenticationDataProvider {
     @Override
     public String getTlsPrivateKeyFilePath() {
         return keyFile != null ? keyFile.getFileName() : null;
+    }
+
+    @Override
+    public boolean hasDataFromCommand() {
+        return true;
+    }
+
+    @Override
+    public String getCommandData() {
+        return getClientCertificate();
+    }
+
+    private String getClientCertificate() {
+
+        String pemEncoded = null;
+
+        if (this.hasDataForTls()) {
+            try {
+                final Certificate tlsClientCertificate = this.getTlsCertificates()[0];
+                byte[] derCertificate = tlsClientCertificate.getEncoded();
+                pemEncoded = Base64.getEncoder().encodeToString(derCertificate);
+            } catch (Exception e) {
+                LOG.warn("Error extracting certificate", e);
+            }
+        } else {
+            LOG.error("Unexpected hasDataForTls result {}", this.hasDataForTls());
+        }
+        return pemEncoded;
     }
 
     private static final Logger LOG = LoggerFactory.getLogger(AuthenticationDataTls.class);
