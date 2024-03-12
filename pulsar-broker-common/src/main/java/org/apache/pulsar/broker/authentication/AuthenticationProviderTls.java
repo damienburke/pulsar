@@ -45,6 +45,7 @@ public class AuthenticationProviderTls implements AuthenticationProvider {
     public enum ErrorCode {
         UNKNOWN,
         INVALID_CERTS,
+        NOT_YET_VALID_CERT,
         EXPIRED_CERTS,
         INVALID_CN, // invalid common name
     }
@@ -167,15 +168,11 @@ final class TlsAuthenticationState implements AuthenticationState {
      * Perform the authentication. Also sets the {@link #role}, which is used by upstream pulsar authorization checks.
      *
      * @param authData contains the bytes of the credential being used for authentication - which in this case is a
-     *                 client
-     *                 certificate.
+     *                 client certificate.
      * @return <code>null</code> (only authentication that is mutual would require a non-null value). For more details,
-     * see
-     * the PIP-30 documentation on mutual authentication changes:
-     * <a
-     * href="https://github.com/apache/pulsar/wiki/PIP-30%3A-change-authentication-provider-API-to-support-mutual
-     * -authentication">
-     * PIP-30: Change Authentication Provider API to Support Mutual Authentication</a>.
+     * see the PIP-30 documentation on mutual authentication changes:
+     * <a href="https://github.com/apache/pulsar/wiki/PIP-30%3A-change-authentication-provider-API-to-support-mutual
+     * -authentication">PIP-30: Change Authentication Provider API to Support Mutual Authentication</a>.
      * @throws AuthenticationException if cert is not valid. If cert is just expired, no exception is thrown, and
      *                                 {@link #expiration} is just set.
      */
@@ -193,16 +190,16 @@ final class TlsAuthenticationState implements AuthenticationState {
             this.clientCertificate.checkValidity();
         } catch (CertificateExpiredException e) {
             incrementFailureMetric(AuthenticationProviderTls.ErrorCode.EXPIRED_CERTS);
-            log.info("expired cert", e);
-            throw new AuthenticationException("expired cert: " + e.getMessage());
+            log.info("Expired client certificate", e);
+            throw new AuthenticationException("Expired client certificate: " + e.getMessage());
         } catch (CertificateNotYetValidException e) {
-            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.INVALID_CERTS);
-            log.warn("invalid cert", e);
-            throw new AuthenticationException("invalid cert: " + e.getMessage());
+            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.NOT_YET_VALID_CERT);
+            log.warn("Invalid client certificate", e);
+            throw new AuthenticationException("Invalid client certificate: " + e.getMessage());
         } catch (Exception e) {
-            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.UNKNOWN);
-            log.warn("unexpected error parsing the cert", e);
-            throw new AuthenticationException("unexpected cert error: " + e.getMessage());
+            incrementFailureMetric(AuthenticationProviderTls.ErrorCode.INVALID_CERTS);
+            log.warn("Unexpected error parsing the client certificate", e);
+            throw new AuthenticationException("Unexpected client certificate error: " + e.getMessage());
         }
 
 
@@ -222,7 +219,7 @@ final class TlsAuthenticationState implements AuthenticationState {
 
     public boolean isComplete() {
         // The authentication of certificates is always done in one single stage, so once certificate is set, it is
-      // "complete"
+        // "complete"
         return clientCertificate != null;
     }
 
